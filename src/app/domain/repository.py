@@ -1,8 +1,9 @@
 from typing import Generic, TypeVar
-
 from sqlmodel import Session, SQLModel, select, or_
 
 from app.domain.models import Note, NoteTagLink, Tag
+from datetime import date, timedelta
+from .models import Contact
 
 T = TypeVar("T", bound=SQLModel)
 
@@ -58,6 +59,50 @@ class BaseRepository(Generic[T]):
 #     model = Contact
 #     def search(self, query: str) -> list[Contact]: ...
 #     def get_upcoming_birthdays(self, days: int = 7) -> list[Contact]: ...
+
+
+class ContactsRepository(BaseRepository[Contact]):
+    # BaseRepository will use this model for generic CRUD operations
+    model = Contact
+
+    def search(self, query: str) -> list[Contact]:
+        # Search contacts by partial name match
+        statement = select(Contact).where(Contact.name.contains(query))
+        return list(self.session.exec(statement).all())
+
+    def get_upcoming_birthdays(self, days: int = 7) -> list[Contact]:
+        # 1. take birthday
+        # 2. move it to current year
+        # 3. if already passed -> next year
+        # 4. if Saturday/Sunday -> move congratulation date to Monday
+        # 5. include contact if congratulation date is in range [today, today + days]
+        today = date.today()
+        end_date = today + timedelta(days=days)
+        result: list[Contact] = []
+
+        for contact in self.list_all():
+            if contact.birthday is None:
+                continue
+
+            # Build this year's birthday date
+            birthday_date = contact.birthday.replace(year=today.year)
+
+            # If birthday already passed this year, use next year
+            if birthday_date < today:
+                birthday_date = birthday_date.replace(year=today.year + 1)
+
+            # Move weekend congratulations to Monday
+            congratulation_date = birthday_date
+            if congratulation_date.weekday() == 5:  # Saturday
+                congratulation_date = congratulation_date + timedelta(days=2)
+            elif congratulation_date.weekday() == 6:  # Sunday
+                congratulation_date = congratulation_date + timedelta(days=1)
+
+            if today <= congratulation_date <= end_date:
+                result.append(contact)
+
+        return result
+    
 
 class NotesRepository(BaseRepository[Note]):
     model = Note
