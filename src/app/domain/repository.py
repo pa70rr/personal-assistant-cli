@@ -1,8 +1,6 @@
 from datetime import date, timedelta
 from typing import Generic, TypeVar
-
 from sqlmodel import Session, SQLModel, or_, select
-
 from app.domain.models import Contact, Note, NoteTagLink, Tag
 
 T = TypeVar("T", bound=SQLModel)
@@ -62,6 +60,20 @@ class ContactsRepository(BaseRepository[Contact]):
         statement = select(Contact).where(Contact.name.contains(query))
         return list(self.session.exec(statement).all())
 
+    def _birthday_for_year(self, original_birthday: date, year: int) -> date:
+        """Return birthday adjusted to a specific year.
+
+        Handles 29 Feb cleanly:
+        - in leap years -> stays 29 Feb
+        - in non-leap years -> becomes 28 Feb
+        """
+        try:
+            return original_birthday.replace(year=year)
+        
+        except ValueError:
+            # This only happens for Feb 29 in a non-leap year
+            return date(year, 2, 28)
+
     def get_upcoming_birthdays(self, days: int = 7) -> list[Contact]:
         # 1. take birthday
         # 2. move it to current year
@@ -76,12 +88,12 @@ class ContactsRepository(BaseRepository[Contact]):
             if contact.birthday is None:
                 continue
 
-            # Build this year's birthday date
-            birthday_date = contact.birthday.replace(year=today.year)
+            # Build birthday for current year
+            birthday_date = self._birthday_for_year(contact.birthday, today.year)
 
             # If birthday already passed this year, use next year
             if birthday_date < today:
-                birthday_date = birthday_date.replace(year=today.year + 1)
+                birthday_date = self._birthday_for_year(contact.birthday, today.year + 1)
 
             # Move weekend congratulations to Monday
             congratulation_date = birthday_date
